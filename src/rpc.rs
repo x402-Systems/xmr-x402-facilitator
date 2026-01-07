@@ -103,7 +103,7 @@ impl MoneroClient {
         txid: String,
         tx_key: String,
         address: String,
-    ) -> Result<u64, String> {
+    ) -> Result<(u64, u64), String> {
         let client = reqwest::Client::new();
         let res = client
             .post(&self.rpc_url)
@@ -126,11 +126,12 @@ impl MoneroClient {
         // check_tx_key returns "received" (amount) and "confirmations"
         if let Some(result) = json.get("result") {
             let received = result["received"].as_u64().unwrap_or(0);
+            let confirmations = result["confirmations"].as_u64().unwrap_or(0);
             println!(
                 "🔍 Proof Verified: Tx {} sent {} piconero to {}",
                 txid, received, address
             );
-            Ok(received)
+            Ok((received, confirmations))
         } else {
             Err("Invalid payment proof or transaction not found".to_string())
         }

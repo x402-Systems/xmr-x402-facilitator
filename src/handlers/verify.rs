@@ -23,7 +23,7 @@ pub async fn verify_payment(
     }
 
     // 2. Cryptographic Proof Check
-    let received = state
+    let (received, confirmations) = state
         .monero
         .verify_payment_proof(
             payload.tx_id.clone(),
@@ -33,19 +33,33 @@ pub async fn verify_payment(
         .await
         .map_err(AppError::Rpc)?;
 
-    if received >= (invoice.amount_required as u64) {
-        sqlx::query!(
-            "UPDATE invoices SET status = 'paid', tx_id = ? WHERE address = ?",
-            payload.tx_id,
-            payload.address
-        )
-        .execute(&state.db)
-        .await?;
+    let required_confs = std::env::var("CONFIRMATIONS_REQUIRED")
+        .unwrap_or_else(|_| "0".to_string())
+        .parse::<u64>()
+        .unwrap_or(0);
 
-        Ok(Json(StatusResponse {
-            status: "paid".to_string(),
-            amount_received: received,
-        }))
+    if received >= (invoice.amount_required as u64) {
+        if confirmations >= required_confs {
+            // FULLY SETTLED
+            sqlx::query!(
+                "UPDATE invoices SET status = 'paid', tx_id = ? WHERE address = ?",
+                payload.tx_id,
+                payload.address
+            )
+            .execute(&state.db)
+            .await?;
+
+            Ok(Json(StatusResponse {
+                status: "paid".to_string(),
+                amount_received: received,
+            }))
+        } else {
+            // RECEIVED BUT UNCONFIRMED
+            Ok(Json(StatusResponse {
+                status: "waiting_confirmations".to_string(),
+                amount_received: received,
+            }))
+        }
     } else {
         Ok(Json(StatusResponse {
             status: "insufficient".to_string(),
