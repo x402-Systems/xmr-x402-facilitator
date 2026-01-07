@@ -97,4 +97,42 @@ impl MoneroClient {
 
         Ok(total_received)
     }
+
+    pub async fn verify_payment_proof(
+        &self,
+        txid: String,
+        tx_key: String,
+        address: String,
+    ) -> Result<u64, String> {
+        let client = reqwest::Client::new();
+        let res = client
+            .post(&self.rpc_url)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": "0",
+                "method": "check_tx_key",
+                "params": {
+                    "txid": txid,
+                    "tx_key": tx_key,
+                    "address": address
+                }
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+
+        // check_tx_key returns "received" (amount) and "confirmations"
+        if let Some(result) = json.get("result") {
+            let received = result["received"].as_u64().unwrap_or(0);
+            println!(
+                "🔍 Proof Verified: Tx {} sent {} piconero to {}",
+                txid, received, address
+            );
+            Ok(received)
+        } else {
+            Err("Invalid payment proof or transaction not found".to_string())
+        }
+    }
 }

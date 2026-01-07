@@ -15,29 +15,42 @@ pub async fn get_protected_resource(
     let payment_address = headers
         .get("x-monero-address")
         .and_then(|h| h.to_str().ok());
+    let tx_id = headers.get("x-monero-tx-id").and_then(|h| h.to_str().ok());
+    let tx_key = headers.get("x-monero-tx-key").and_then(|h| h.to_str().ok());
 
-    if let Some(address) = payment_address {
+    // If we have all proof components, verify them
+    if let (Some(addr), Some(id), Some(key)) = (payment_address, tx_id, tx_key) {
         // Use '?' to return AppError::Database if query fails
         let invoice = sqlx::query!(
             "SELECT amount_required FROM invoices WHERE address = ?",
-            address
+            addr
         )
         .fetch_optional(&state.db)
         .await?;
 
         if let Some(inv) = invoice {
-            let received = state
+            // VERIFICATION STEP:
+            // We check the specific TX proof against the expected amount
+            match state
                 .monero
-                .check_payment(address.to_string())
+                .verify_payment_proof(id.to_string(), key.to_string(), addr.to_string())
                 .await
-                .map_err(AppError::Rpc)?; // Map string error to AppError
-
-            if received >= (inv.amount_required as u64) {
-                return Ok((StatusCode::OK, "ACCESS_GRANTED").into_response());
+            {
+                Ok(received) => {
+                    if received >= (inv.amount_required as u64) {
+                        return Ok(
+                            (StatusCode::OK, "ACCESS_GRANTED: Proof Verified").into_response()
+                        );
+                    } else {
+                        return Err(AppError::Rpc("Proof amount insufficient".to_string()));
+                    }
+                }
+                Err(e) => return Err(AppError::Rpc(e)),
             }
         }
     }
 
+    // Otherwise, issue a fresh 402 challenge
     Ok(generate_402_challenge(state).await?)
 }
 
