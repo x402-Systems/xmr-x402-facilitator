@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct X402Request {
-    #[serde(rename = "paymentPayload")]
+    #[serde(rename = "paymentPayload", alias = "payment_payload")]
     pub payment_payload: serde_json::Value,
-    #[serde(rename = "paymentRequirements")]
+    #[serde(rename = "paymentRequirements", alias = "payment_requirements")]
     pub payment_requirements: serde_json::Value,
 }
 
@@ -46,10 +46,12 @@ pub struct SettleResponse {
 
 // --- Monero Specific Payload (The internal content of paymentPayload) ---
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct MoneroPaymentPayload {
     pub address: String,
+    #[serde(alias = "txId")]
     pub tx_id: String,
+    #[serde(alias = "txKey")]
     pub tx_key: String,
 }
 

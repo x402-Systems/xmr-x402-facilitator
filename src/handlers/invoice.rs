@@ -15,6 +15,28 @@ pub async fn create_invoice(
     State(state): State<SharedState>,
     Json(payload): Json<CreateInvoiceRequest>,
 ) -> Result<Json<InvoiceResponse>, AppError> {
+    // 1. Check if a pending invoice already exists for this metadata
+    if let Some(metadata) = &payload.metadata {
+        let existing = sqlx::query!(
+            "SELECT address, amount_required FROM invoices WHERE metadata = ? AND status = 'pending' LIMIT 1",
+            metadata
+        )
+        .fetch_optional(&state.db)
+        .await?;
+
+        if let Some(row) = existing {
+            return Ok(Json(InvoiceResponse {
+                // FIXED: row.address is Option<String>, convert to String
+                address: row.address.unwrap_or_default(),
+                amount_piconero: row.amount_required as u64,
+                invoice_id: metadata.clone(),
+                status: "pending".to_string(),
+                network: get_network_id(),
+            }));
+        }
+    }
+
+    // 2. Proceed with creating a new one
     let amount = state
         .monero
         .get_xmr_price_piconero(payload.amount_usd)
@@ -32,13 +54,18 @@ pub async fn create_invoice(
         .unwrap()
         .as_secs() as i64;
 
+    let invoice_id = payload
+        .metadata
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
     let amount_i64 = amount as i64;
 
     sqlx::query!(
         "INSERT INTO invoices (address, amount_required, metadata, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
         address,
         amount_i64,
-        payload.metadata,
+        invoice_id,
         now
     )
     .execute(&state.db)
@@ -47,7 +74,7 @@ pub async fn create_invoice(
     Ok(Json(InvoiceResponse {
         address,
         amount_piconero: amount,
-        invoice_id: uuid::Uuid::new_v4().to_string(),
+        invoice_id,
         status: "pending".to_string(),
         network: get_network_id(),
     }))
@@ -66,6 +93,7 @@ pub async fn get_invoice_status(
     .ok_or(AppError::NotFound)?;
 
     Ok(Json(InvoiceResponse {
+        // FIXED: row.address is Option<String>, convert to String
         address: row.address.unwrap_or_default(),
         amount_piconero: row.amount_required as u64,
         invoice_id: row.metadata.unwrap_or_default(),
