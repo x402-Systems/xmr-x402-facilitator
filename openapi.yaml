@@ -1,0 +1,138 @@
+openapi: 3.1.0
+info:
+  title: Universal Monero x402 Facilitator
+  description: >
+    A sidecar daemon providing a universal x402-compliant interface for Monero (XMR) payments.
+    Supports cryptographic proof-of-payment via transaction secret keys.
+  version: 1.0.0
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:3113
+    description: Local development server
+
+paths:
+  /invoices:
+    post:
+      summary: Create a new invoice
+      description: Generates a unique Monero subaddress and calculates the required XMR based on real-time USD market price.
+      operationId: createInvoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInvoiceRequest'
+      responses:
+        '200':
+          description: Invoice created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceResponse'
+        '502':
+          description: Monero RPC or Price API error
+
+  /verify:
+    post:
+      summary: Verify payment proof
+      description: Cryptographically verifies that a specific transaction was sent to a specific subaddress using the one-time tx_key.
+      operationId: verifyPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+      responses:
+        '200':
+          description: Verification check completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+
+  /invoices/{address}:
+    get:
+      summary: Get invoice status
+      description: Retrieves the current status and metadata for an existing invoice subaddress.
+      operationId: getInvoiceStatus
+      parameters:
+        - name: address
+          in: path
+          required: true
+          description: The Monero subaddress of the invoice
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invoice details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceResponse'
+        '404':
+          description: Invoice not found
+
+components:
+  schemas:
+    CreateInvoiceRequest:
+      type: object
+      required:
+        - amount_usd
+      properties:
+        amount_usd:
+          type: number
+          format: double
+          example: 0.50
+        metadata:
+          type: string
+          description: Custom identifier (e.g., VPS ID) to bind to the payment.
+          example: "vps_99_instance"
+
+    InvoiceResponse:
+      type: object
+      properties:
+        address:
+          type: string
+          example: "8..."
+        amount_piconero:
+          type: integer
+          format: int64
+          example: 125000000
+        invoice_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, paid, waiting_confirmations, expired]
+        network:
+          type: string
+          example: "stagenet"
+
+    VerifyRequest:
+      type: object
+      required:
+        - address
+        - tx_id
+        - tx_key
+      properties:
+        address:
+          type: string
+          description: The subaddress used for the invoice.
+        tx_id:
+          type: string
+          description: The Monero transaction hash.
+        tx_key:
+          type: string
+          description: The secret transaction key provided by the sender's wallet.
+
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "paid"
+        amount_received:
+          type: integer
+          format: int64

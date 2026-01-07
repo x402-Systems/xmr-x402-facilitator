@@ -24,6 +24,11 @@ To provide a sovereign, self-hosted alternative to corporate payment facilitator
 - **Crypto Integration:** Monero-Wallet-RPC
 - **Pricing:** CoinGecko API
 
+## Developer Tooling
+This project includes a standard **OpenAPI 3.1** specification.
+
+- **`openapi.yaml`**: Can be imported into Postman or used to generate client libraries in Go, TS, or Python.
+
 ## Getting Started
 
 ### Prerequisites
