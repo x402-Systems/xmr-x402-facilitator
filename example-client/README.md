@@ -1,22 +1,24 @@
-# x402 Python Example Agent
+# Monero x402 Python Client (Universal)
 
-This is a reference implementation of an **AI Agent** or **Autonomous Client** capable of handling Monero x402 payment challenges.
+This is a reference implementation of an **Automated Agent** capable of interacting with the Universal Monero x402 Facilitator. 
 
-When this client encounters an `HTTP 402 Payment Required` response from a facilitator, it automatically:
-1. Parses the Monero subaddress and required amount.
-2. Communicates with a local "Customer" Monero wallet.
-3. Fulfills the payment.
-4. Retries the original request with the payment proof.
+Unlike simple crypto-gate scripts, this client demonstrates the full lifecycle of a cryptographically secure x402 payment using **Transaction Proofs (`tx_key`)**. This ensures that the payment is mathematically tied to the sender, preventing spoofing and replay attacks.
 
-## Prerequisites
+## Capabilities
+- **Invoice Acquisition:** Requests a fresh Monero subaddress and price-adjusted XMR amount from the Facilitator.
+- **Automated Settlement:** Fulfills the payment using a local Monero Wallet RPC.
+- **Cryptographic Proof:** Extracts the one-time `tx_key` from the wallet to prove ownership of the transaction.
+- **Oracle Verification:** Submits the proof to the Facilitator's `/verify` endpoint to confirm settlement.
 
-- **Python & uv:** We use [uv](https://github.com/astral-sh/uv) for lightning-fast dependency management.
-- **Monero Wallet RPC:** You must have a "Customer" wallet running in RPC mode to allow the script to spend XMR.
+## 🛠 Prerequisites
+
+- **Python & uv:** We use [uv](https://github.com/astral-sh/uv) for fast dependency management.
+- **Monero Wallet RPC:** You must have a "Customer" wallet running in RPC mode to spend XMR.
 
 ## Quick Start
 
 ### 1. Configure the Wallet RPC
-Ensure your "Spender" wallet is running on a different port than the facilitator's wallet to avoid conflicts:
+Run your "Customer" wallet on a different port than your merchant wallet to avoid file locking:
 
 ```bash
 monero-wallet-rpc --stagenet \
@@ -27,42 +29,34 @@ monero-wallet-rpc --stagenet \
 ```
 
 ### 2. Setup the Client
-From inside this directory, install dependencies and run:
+Install dependencies and run the agent flow:
 
 ```bash
-# Install dependencies (requests)
+# Sync dependencies
 uv sync
 
-# Run the agent
+# Run the full automated flow
 uv run client.py
 ```
 
-## How it Works
+## How the Universal Flow Works
 
-The client implements a **reactive flow**:
+The client follows the **Merchant-Facilitator-Client** lifecycle:
 
-1. **The Probe:** It attempts a standard `GET` request to the protected resource.
-2. **The Catch:** If the server returns `402`, the script catches the exception and extracts the `X402Requirement` JSON.
-3. **The Settlement:** It calls the `transfer` method on the Customer Wallet RPC.
-4. **The Proof:** It takes the generated subaddress and places it in the `x-monero-address` header.
-5. **The Success:** It retries the request and receives the gated content.
+1. **Invoice Generation:** The client (acting as or on behalf of a merchant) calls `POST /invoices` on the Facilitator to get a unique subaddress and the current market price in XMR.
+2. **The Settlement:** The script calls the `transfer` method on the Customer Wallet with `get_tx_key: True`. This generates a private secret key used only for this transaction.
+3. **Mempool Wait:** The script waits briefly for the transaction to propagate to the daemon's mempool.
+4. **Verification:** The client sends the `address`, `tx_id`, and `tx_key` to the Facilitator's `POST /verify` endpoint.
+5. **Finality:** Once the Facilitator returns `{"status": "paid"}`, the transaction is considered settled, and the resource can be safely delivered.
 
-## Agent Logic (Safety Features)
-In a production agent, you should modify `client.py` to include a **Spending Limit**. 
+## Security Note: `tx_key` vs. `tx_id`
+In this universal implementation, providing just a `tx_id` (Transaction Hash) is **not enough** to get access. Because `tx_id`s are public on the blockchain, anyone could spoof a header. 
 
-Example logic to add:
-```python
-MAX_BUDGET_USD = 1.00
-if current_invoice_usd > MAX_BUDGET_USD:
-    raise Exception("Agent refused to pay: Invoice exceeds safety limit.")
-```
+This client provides the `tx_key`, which is a **private secret** known only to the sender. The Facilitator uses this key to cryptographically verify that *this* specific client actually sent the funds.
 
 ## Customization
-- **FACILITATOR_URL:** Point this to your Rust Facilitator instance.
-- **CUSTOMER_WALLET_RPC:** Point this to the wallet you want to spend from.
-```python
-CUSTOMER_WALLET_RPC = "http://localhost:18084/json_rpc"
-```
+- **FACILITATOR_API:** The URL of your Rust sidecar (default: `http://localhost:3113`).
+- **CUSTOMER_WALLET_RPC:** The URL of your spending wallet (default: `http://localhost:18084`).
 
 ---
 *Part of the Monero x402 Open Source Facilitator project.*

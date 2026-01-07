@@ -3,52 +3,72 @@ mod models;
 mod rpc;
 mod state;
 
-use axum::{Router, routing::get};
+use axum::{
+    Router,
+    routing::{get, post},
+};
 use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
+use tower_http::cors::{Any, CorsLayer};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
-    let db_url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:facilitator.db".to_string());
-
+    // Database setup
+    let db_url = std::env::var("DATABASE_URL").unwrap_or("sqlite:facilitator.db".to_string());
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(&db_url)
         .await?;
 
-    // Apply migrations/schema check
+    // Create Universal Schema
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS invoices (
             address TEXT PRIMARY KEY,
             amount_required INTEGER NOT NULL,
+            metadata TEXT,
+            status TEXT,
+            tx_id TEXT,
             created_at INTEGER NOT NULL
         )",
     )
     .execute(&pool)
     .await?;
 
-    let monero_url = std::env::var("MONERO_RPC_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:18083/json_rpc".into());
+    let monero_url =
+        std::env::var("MONERO_RPC_URL").unwrap_or("http://127.0.0.1:18083/json_rpc".into());
 
     let shared_state = Arc::new(state::AppState {
         monero: rpc::MoneroClient {
             rpc_url: monero_url,
         },
         db: pool,
-        price_per_access_usd: 0.10,
+        price_per_access_usd: 0.10, // Default fallback
     });
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    // Universal API Routes
     let app = Router::new()
-        .route("/content", get(handlers::get_protected_resource))
+        // Merchant Routes
+        .route("/invoices", post(handlers::create_invoice))
+        .route("/invoices/{address}", get(handlers::get_invoice_status))
+        // Verification Route (Public/Client)
+        .route("/verify", post(handlers::verify_payment))
+        .layer(cors)
         .with_state(shared_state);
 
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 3113));
-    println!("🚀 Monero x402 Facilitator Live on {}", addr);
+    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3113".to_string());
+    let addr_str = format!("{}:{}", host, port);
 
-    axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
+    println!("🚀 Universal XMR x402 Facilitator Live on {}", addr_str);
 
+    let listener = tokio::net::TcpListener::bind(&addr_str).await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }

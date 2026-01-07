@@ -3,17 +3,34 @@ import time
 import json
 
 # Configuration
-FACILITATOR_URL = "http://localhost:3113/content"
+FACILITATOR_API = "http://localhost:3113" 
 # Your customer wallet port (Spender)
 CUSTOMER_WALLET_RPC = "http://localhost:18084/json_rpc" 
 
+def create_invoice(usd_amount, metadata="agent_request"):
+    """
+    Simulates a Merchant/Client requesting a new invoice from the Facilitator.
+    """
+    print(f"📝 Requesting invoice for ${usd_amount} USD...")
+    resp = requests.post(f"{FACILITATOR_API}/invoices", json={
+        "amount_usd": usd_amount,
+        "metadata": metadata
+    })
+    if resp.status_code == 200:
+        data = resp.json()
+        print(f"✅ Invoice created: {data['address']}")
+        return data
+    else:
+        print(f"❌ Failed to create invoice: {resp.text}")
+        return None
+
 def pay_xmr(address, amount_piconero):
     """
-    Talks to the customer's wallet to fulfill the x402 request.
-    Requests a 'tx_key' which acts as a private proof of payment.
+    Talks to the customer's wallet to fulfill the payment.
+    Requests 'get_tx_key' to provide cryptographic proof to the facilitator.
     """
     print(f"💸 Auto-paying {amount_piconero} piconero to {address}...")
-    
+
     payload = {
         "jsonrpc": "2.0",
         "id": "0",
@@ -25,74 +42,58 @@ def pay_xmr(address, amount_piconero):
             "get_tx_key": True
         }
     }
-    
+
     try:
         response = requests.post(CUSTOMER_WALLET_RPC, json=payload)
         result = response.json()
-        
+
         if "result" in result:
-            tx_hash = result["result"]["tx_hash"]
-            tx_key = result["result"]["tx_key"]
-            print(f"✅ Transaction sent!")
-            print(f"🔗 Hash: {tx_hash}")
-            print(f"🔑 Proof Key: {tx_key}")
-            return tx_hash, tx_key
+            return result["result"]["tx_hash"], result["result"]["tx_key"]
         else:
-            error_msg = result.get('error', {}).get('message', 'Unknown RPC error')
-            print(f"❌ Payment failed: {error_msg}")
+            print(f"❌ Payment failed: {result.get('error')}")
             return None, None
-            
     except Exception as e:
-        print(f"❌ Connection error to wallet: {e}")
+        print(f"❌ Wallet connection error: {e}")
         return None, None
 
-def fetch_resource():
-    print(f"🚀 Attempting to fetch protected resource: {FACILITATOR_URL}")
-    
-    # Initial Attempt (Will trigger 402)
-    resp = requests.get(FACILITATOR_URL)
-    
-    if resp.status_code == 402:
-        print("⚠️ Received HTTP 402: Payment Required.")
-        try:
-            data = resp.json()
-            address = data["address"]
-            amount = data["amount_piconero"]
-        except Exception:
-            print("❌ Failed to parse x402 requirement from server.")
-            return
-        
-        # Pay the Invoice and get the cryptographic proof (tx_key)
-        txid, txkey = pay_xmr(address, amount)
-        
-        if txid and txkey:
-            # Short sleep to ensure the node mempool has seen the TX
-            print("⏳ Waiting for transaction propagation (15s)...")
-            time.sleep(15) 
-            
-            # 3. Retry with ALL components: Address + TX ID + TX Key
-            print("🔄 Retrying request with cryptographic proof headers...")
-            headers = {
-                "x-monero-address": address,
-                "x-monero-tx-id": txid,
-                "x-monero-tx-key": txkey
-            }
-            
-            final_resp = requests.get(FACILITATOR_URL, headers=headers)
-            
-            if final_resp.status_code == 200:
-                print(f"\n🎉 SUCCESS! Resource Unlocked:")
-                print("-" * 30)
-                print(final_resp.text)
-                print("-" * 30)
-            else:
-                print(f"❌ Access Denied: {final_resp.status_code}")
-                print(f"Response: {final_resp.text}")
-    
-    elif resp.status_code == 200:
-        print(f"✅ Resource already unlocked: {resp.text}")
+def verify_payment(address, tx_id, tx_key):
+    """
+    Submits the cryptographic proof to the Facilitator's /verify endpoint.
+    """
+    print(f"🔍 Submitting proof to Facilitator for verification...")
+    resp = requests.post(f"{FACILITATOR_API}/verify", json={
+        "address": address,
+        "tx_id": tx_id,
+        "tx_key": tx_key
+    })
+    return resp.json()
+
+def run_universal_flow():
+    # 1. Create an Invoice (The 'Merchant' step)
+    invoice = create_invoice(0.10, "test_vps_provision")
+    if not invoice: return
+
+    # 2. Pay the Invoice (The 'Customer' step)
+    tx_id, tx_key = pay_xmr(invoice["address"], invoice["amount_piconero"])
+    if not tx_id: return
+
+    # 3. Wait for Mempool Propagation
+    print("⏳ Waiting 15s for mempool visibility...")
+    time.sleep(15)
+
+    # 4. Verify the Payment (The 'Oracle' step)
+    status = verify_payment(invoice["address"], tx_id, tx_key)
+
+    if status.get("status") == "paid":
+        print(f"\n🎉 SUCCESS: Facilitator confirms payment is verified!")
+        print(f"💰 Amount Received: {status['amount_received']} piconero")
+
+        # Now you would check the status again via the GET endpoint to see metadata
+        print(f"📡 Checking final invoice status...")
+        final_check = requests.get(f"{FACILITATOR_API}/invoices/{invoice['address']}")
+        print(f"Final Data: {json.dumps(final_check.json(), indent=2)}")
     else:
-        print(f"❓ Unexpected status: {resp.status_code}")
+        print(f"❌ Verification failed: {status}")
 
 if __name__ == "__main__":
-    fetch_resource()
+    run_universal_flow()

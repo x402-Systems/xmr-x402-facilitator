@@ -1,73 +1,80 @@
-# Monero x402 Facilitator (PoC)
+# Universal Monero x402 Facilitator (Daemon)
 
-An open-source, privacy-respecting facilitator that implements the **HTTP 402 (Payment Required)** protocol for Monero (XMR). 
+An open-source, privacy-respecting payment oracle that implements the **HTTP 402 (Payment Required)** protocol for Monero (XMR). 
 
-This project allows web servers and AI agents to request and settle micro-payments in XMR using the "x402" standard currently being championed by Coinbase and Cloudflare, but with the added confidentiality of the Monero network.
+This project acts as a **sidecar daemon** for web servers, AI agents, and microservices. It bridges the gap between the "Agentic Web" (x402) and Monero's private-by-default network, allowing any application (Go, JS, Python, Rust) to accept XMR without needing to implement complex blockchain logic.
 
 ## Vision
-The goal of this facilitator is to enable a "Web Native" payment layer where:
-1. **Servers** can gate APIs or content behind a 402 challenge.
-2. **Clients (AI Agents)** can detect the challenge and auto-pay via XMR.
-3. **Privacy** is maintained through unique subaddresses and Monero's stealth address system.
+To provide a sovereign, self-hosted alternative to corporate payment facilitators. By running this daemon alongside your application, you can gate resources behind XMR micro-payments while maintaining 100% control over your own View Keys and Node infrastructure.
 
-## Features (Current PoC)
-- **Persistent Invoices:** SQLite-backed storage ensures payments aren't lost on restart.
-- **Dynamic Pricing:** Automatically fetches the current XMR/USD price from CoinGecko to settle in piconero.
-- **Zero-Conf Ready:** Monitors the Monero mempool to grant access the moment a transaction is broadcast.
-- **Privacy First:** Never reuses addresses; generates a fresh subaddress for every single request.
-- **Robustness:** Implements structured error handling to manage RPC or Price API outages.
+## Protocol Flow
+![Flow Chart](assets/flow-chart.png)
 
-## Tech Stack
-- **Language:** Rust
-- **Framework:** Axum (Web), SQLx (Database)
+## ✨ Features
+- **Universal Sidecar:** RESTful API for creating invoices and verifying payments from any programming language.
+- **Cryptographic Proof-of-Payment:** Uses Monero's `tx_key` (Transaction Secret Key) to verify sender ownership, preventing header spoofing and replay attacks.
+- **Persistent Storage:** SQLite/SQLx backend tracks invoice lifecycles (Pending, Paid, Expired).
+- **Dynamic Market Pricing:** Fetches real-time XMR/USD exchange rates via CoinGecko.
+- **0-Conf Ready:** Scans the mempool for incoming transactions to provide an instant "Web Native" experience.
+- **Privacy Centric:** Generates unique subaddresses for every request; no address reuse.
+
+## 🛠 Tech Stack
+- **Language:** Rust (Axum)
+- **Database:** SQLite (SQLx)
 - **Crypto Integration:** Monero-Wallet-RPC
-- **Persistence:** SQLite
+- **Pricing:** CoinGecko API
 
 ## Getting Started
 
 ### Prerequisites
-1. **Monero Wallet RPC:** Must be running (Mainnet or Stagenet).
+1. **Monero Wallet RPC:** Must be running with a wallet file loaded.
    ```bash
    monero-wallet-rpc --stagenet --rpc-bind-port 18083 --disable-rpc-login --wallet-file your_wallet
    ```
 2. **Rust Toolchain:** (Cargo/Rustc)
 
-### Configuration
-Create a `.env` file:
-```env
-DATABASE_URL=sqlite:facilitator.db
-MONERO_RPC_URL=http://127.0.0.1:18083/json_rpc
-```
-
 ### Installation
-1. Initialize the database:
+1. **Configure:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your RPC URL and Database path
+   ```
+2. **Initialize Database:**
    ```bash
    touch facilitator.db
-   sqlite3 facilitator.db "CREATE TABLE invoices (address TEXT PRIMARY KEY, amount_required INTEGER NOT NULL, created_at INTEGER NOT NULL);"
+   sqlite3 facilitator.db "CREATE TABLE invoices (address TEXT PRIMARY KEY, amount_required INTEGER NOT NULL, metadata TEXT, status TEXT, tx_id TEXT, created_at INTEGER NOT NULL);"
    ```
-2. Run the facilitator:
+3. **Build & Run:**
    ```bash
    cargo run
    ```
 
-## Protocol Flow
-1. **Request:** Client hits `/content`.
-2. **Challenge:** Server returns `HTTP 402` with a JSON payload:
-   - `address`: Unique Monero subaddress.
-   - `amount_piconero`: Total required to unlock.
-3. **Payment:** Client broadcasts XMR transaction.
-4. **Verification:** Client retries request with header `x-monero-address: <subaddress>`.
-5. **Success:** Server returns `HTTP 200` and the resource.
+## Universal API Reference
+
+### 1. Create Invoice (`POST /invoices`)
+Called by the Merchant App to generate a payment challenge.
+- **Input:** `{"amount_usd": 0.50, "metadata": "vps_id_101"}`
+- **Returns:** `{"address": "7...", "amount_piconero": 12345, "invoice_id": "...", "status": "pending", "network": "stagenet"}`
+
+### 2. Verify Payment (`POST /verify`)
+Called to submit cryptographic proof of payment.
+- **Input:** `{"address": "7...", "tx_id": "...", "tx_key": "..."}`
+- **Returns:** `{"status": "paid", "amount_received": 12345}`
+
+### 3. Check Status (`GET /invoices/:address`)
+Polls the current status of an invoice.
+
+## Security: The `tx_key` Advantage
+Unlike transparent ledgers where seeing a transaction is enough proof, Monero's privacy requires the sender to prove they are the one who sent the funds. This facilitator requires the client to provide the `tx_key` generated by their wallet. 
+- The facilitator uses `check_tx_key` via RPC to verify that the key proves a transfer to the specific subaddress.
+- This ensures that users cannot "spoof" headers by simply finding high-value TXIDs on a block explorer.
 
 ## Status: Proof of Concept
-This is a PoC. Before a production release, the following are required:
-- [ ] **Webhook Support:** Notify external apps when a payment is confirmed.
-- [ ] **Tor Integration:** Support for broadcasting/verifying via .onion services.
-- [ ] **Client Library:** A Rust/Python library for AI agents to auto-handle the 402 flow.
-- [ ] **Pruning:** Auto-delete old invoice metadata after 48 hours for maximum privacy.
-
-## Privacy Disclaimer
-This facilitator is designed to be run by the merchant. While it uses Monero, metadata (IP addresses, request times) is still visible to the server host. For maximum privacy, run this service over **Tor** or **I2P**.
+- [x] Universal REST API
+- [x] Cryptographic verification (tx_key)
+- [x] SQLite persistence
+- [ ] Webhook support (Next)
+- [ ] Tor / .onion service support (Next)
 
 ## Contributing
-This is an open-source project. Contributions to bridge the privacy gap in the automated web are welcome.
+This is an open-source project designed to strengthen the Monero ecosystem. Contributions, bug reports, and integration examples are welcome.

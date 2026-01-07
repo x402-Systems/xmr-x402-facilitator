@@ -5,42 +5,52 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct X402Requirement {
-    pub protocol: String,     // "monero"
-    pub network: String,      // "mainnet" or "stagenet"
-    pub amount_piconero: u64, // Atomic units
-    pub address: String,      // The unique subaddress
-    pub invoice_id: String,   // To track the session
+#[derive(Deserialize)]
+pub struct CreateInvoiceRequest {
+    pub amount_usd: f64,
+    pub metadata: Option<String>,
 }
 
 #[derive(Serialize)]
-pub struct ErrorResponse {
-    pub error: String,
+pub struct InvoiceResponse {
+    pub address: String,
+    pub amount_piconero: u64,
+    pub invoice_id: String,
+    pub status: String,
+    pub network: String,
 }
 
+#[derive(Deserialize)]
+pub struct VerifyRequest {
+    pub address: String,
+    pub tx_id: String,
+    pub tx_key: String,
+}
+
+#[derive(Serialize)]
+pub struct StatusResponse {
+    pub status: String,
+    pub amount_received: u64,
+}
+
+// Universal Error Handler
 pub enum AppError {
     Database(String),
     Rpc(String),
-    PriceApi(String),
     NotFound,
 }
 
-// This allows us to use '?' in handlers and have it auto-convert to an HTTP response
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message) = match self {
+        let (status, msg) = match self {
             AppError::Database(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
             AppError::Rpc(e) => (StatusCode::BAD_GATEWAY, e),
-            AppError::PriceApi(e) => (StatusCode::SERVICE_UNAVAILABLE, e),
-            AppError::NotFound => (StatusCode::NOT_FOUND, "Resource not found".to_string()),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "Invoice not found".to_string()),
         };
-
-        (status, Json(ErrorResponse { error: message })).into_response()
+        (status, Json(serde_json::json!({ "error": msg }))).into_response()
     }
 }
 
-// Helper to convert sqlx errors
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
         AppError::Database(err.to_string())
