@@ -58,7 +58,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/invoices", post(handlers::create_invoice))
         .route("/invoices/{address}", get(handlers::get_invoice_status))
         // Verification Route (Public/Client)
+        .route("/supported", get(handlers::get_supported))
         .route("/verify", post(handlers::verify_payment))
+        .route("/settle", post(handlers::settle_payment))
         .layer(cors)
         .with_state(shared_state);
 

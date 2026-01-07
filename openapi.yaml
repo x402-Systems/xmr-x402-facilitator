@@ -2,137 +2,126 @@ openapi: 3.1.0
 info:
   title: Universal Monero x402 Facilitator
   description: >
-    A sidecar daemon providing a universal x402-compliant interface for Monero (XMR) payments.
-    Supports cryptographic proof-of-payment via transaction secret keys.
-  version: 1.0.0
-  license:
-    name: MIT
+    A x402-compliant sidecar daemon for Monero (XMR).
+    Standardizes Monero payments for AI agents and the Agentic Web.
+  version: 1.1.0
 servers:
   - url: http://localhost:3113
-    description: Local development server
 
 paths:
-  /invoices:
-    post:
-      summary: Create a new invoice
-      description: Generates a unique Monero subaddress and calculates the required XMR based on real-time USD market price.
-      operationId: createInvoice
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateInvoiceRequest'
+  /supported:
+    get:
+      summary: Get supported networks
       responses:
         '200':
-          description: Invoice created successfully
+          description: Supported network kinds
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InvoiceResponse'
-        '502':
-          description: Monero RPC or Price API error
+                $ref: '#/components/schemas/SupportedResponse'
+
+  /settle:
+    post:
+      summary: Settle a payment
+      description: Verifies cryptographic proof (tx_key) and settles the transaction on-chain.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/X402Request'
+      responses:
+        '200':
+          description: Settlement successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettleResponse'
 
   /verify:
     post:
-      summary: Verify payment proof
-      description: Cryptographically verifies that a specific transaction was sent to a specific subaddress using the one-time tx_key.
-      operationId: verifyPayment
+      summary: Verify a payment signature
+      description: Lightweight check to see if a payment is valid without finalizing settlement.
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/VerifyRequest'
+              $ref: '#/components/schemas/X402Request'
       responses:
         '200':
-          description: Verification check completed
+          description: Verification result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StatusResponse'
+                $ref: '#/components/schemas/VerifyResponse'
 
-  /invoices/{address}:
-    get:
-      summary: Get invoice status
-      description: Retrieves the current status and metadata for an existing invoice subaddress.
-      operationId: getInvoiceStatus
-      parameters:
-        - name: address
-          in: path
-          required: true
-          description: The Monero subaddress of the invoice
-          schema:
-            type: string
+  /invoices:
+    post:
+      summary: (Helper) Create new invoice
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount_usd:
+                  type: number
       responses:
         '200':
-          description: Invoice details retrieved
+          description: Invoice created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/InvoiceResponse'
-        '404':
-          description: Invoice not found
 
 components:
   schemas:
-    CreateInvoiceRequest:
+    X402Request:
       type: object
-      required:
-        - amount_usd
+      required: [paymentPayload, paymentRequirements]
       properties:
-        amount_usd:
-          type: number
-          format: double
-          example: 0.50
-        metadata:
-          type: string
-          description: Custom identifier (e.g., VPS ID) to bind to the payment.
-          example: "vps_99_instance"
+        paymentPayload:
+          type: object
+          properties:
+            address: { type: string }
+            tx_id: { type: string }
+            tx_key: { type: string }
+        paymentRequirements:
+          type: object
+          properties:
+            scheme: { type: string, example: "exact" }
+            network: { type: string, example: "monero:mainnet" }
+
+    SupportedResponse:
+      type: object
+      properties:
+        kinds:
+          type: array
+          items:
+            type: object
+            properties:
+              x402Version: { type: integer, example: 2 }
+              scheme: { type: string, example: "exact" }
+              network: { type: string, example: "monero:mainnet" }
+
+    VerifyResponse:
+      type: object
+      properties:
+        isValid: { type: boolean }
+        invalidReason: { type: string }
+
+    SettleResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        transaction: { type: string }
+        network: { type: string }
+        payer: { type: string, example: "anonymous" }
 
     InvoiceResponse:
       type: object
       properties:
-        address:
-          type: string
-          example: "8..."
-        amount_piconero:
-          type: integer
-          format: int64
-          example: 125000000
-        invoice_id:
-          type: string
-          format: uuid
-        status:
-          type: string
-          enum: [pending, paid, waiting_confirmations, expired]
-        network:
-          type: string
-          example: "stagenet"
-
-    VerifyRequest:
-      type: object
-      required:
-        - address
-        - tx_id
-        - tx_key
-      properties:
-        address:
-          type: string
-          description: The subaddress used for the invoice.
-        tx_id:
-          type: string
-          description: The Monero transaction hash.
-        tx_key:
-          type: string
-          description: The secret transaction key provided by the sender's wallet.
-
-    StatusResponse:
-      type: object
-      properties:
-        status:
-          type: string
-          example: "paid"
-        amount_received:
-          type: integer
-          format: int64
+        address: { type: string }
+        amount_piconero: { type: integer }
+        invoice_id: { type: string }
+        status: { type: string }
+        network: { type: string }

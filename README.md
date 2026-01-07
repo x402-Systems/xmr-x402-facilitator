@@ -1,8 +1,8 @@
 # Universal Monero x402 Facilitator (Daemon)
 
-An open-source, privacy-respecting payment oracle that implements the **HTTP 402 (Payment Required)** protocol for Monero (XMR). 
+An open-source, privacy-respecting payment oracle that implements the **x402 (Payment Required)** protocol for Monero (XMR). 
 
-This project acts as a **sidecar daemon** for web servers, AI agents, and microservices. It bridges the gap between the "Agentic Web" (x402) and Monero's private-by-default network, allowing any application (Go, JS, Python, Rust) to accept XMR without needing to implement complex blockchain logic.
+This project acts as a **sidecar daemon** for web servers, AI agents, and microservices. It bridges the gap between the "Agentic Web" and Monero's private-by-default network, allowing any application (Go, JS, Python) to accept XMR using the Coinbase x402 standard.
 
 ## Vision
 To provide a sovereign, self-hosted alternative to corporate payment facilitators. By running this daemon alongside your application, you can gate resources behind XMR micro-payments while maintaining 100% control over your own View Keys and Node infrastructure.
@@ -10,7 +10,15 @@ To provide a sovereign, self-hosted alternative to corporate payment facilitator
 ## Protocol Flow
 ![Flow Chart](assets/flow-chart.png)
 
+1. **Merchant App** calls `/invoices` to generate a subaddress and price.
+2. **Merchant App** returns a `402 Payment Required` header to the Client.
+3. **Client** pays via XMR and retrieves the `tx_key` from their wallet.
+4. **Client** submits `tx_id` and `tx_key` to the Merchant.
+5. **Merchant App** calls `/settle` on this Facilitator to verify and unlock the resource.
+
 ## Features
+- **x402 Compliant:** Implements `/supported`, `/verify`, and `/settle` endpoints.
+- **Privacy Centric:** Generates unique subaddresses for every request; no address reuse.
 - **Universal Sidecar:** RESTful API for creating invoices and verifying payments from any programming language.
 - **Cryptographic Proof-of-Payment:** Uses Monero's `tx_key` (Transaction Secret Key) to verify sender ownership, preventing header spoofing and replay attacks.
 - **Persistent Storage:** SQLite/SQLx backend tracks invoice lifecycles (Pending, Paid, Expired).
@@ -54,20 +62,38 @@ This project includes a standard **OpenAPI 3.1** specification.
    cargo run
    ```
 
-## Universal API Reference
+## Standard x402 API Reference
 
-### 1. Create Invoice (`POST /invoices`)
-Called by the Merchant App to generate a payment challenge.
-- **Input:** `{"amount_usd": 0.50, "metadata": "vps_id_101"}`
-- **Returns:** `{"address": "7...", "amount_piconero": 12345, "invoice_id": "...", "status": "pending", "network": "stagenet"}`
+### 1. Supported Kinds (`GET /supported`)
+Returns the network and scheme supported by this facilitator.
+- **Returns:** `{"kinds": [{"x402Version": 2, "scheme": "exact", "network": "monero:stagenet"}]}`
 
-### 2. Verify Payment (`POST /verify`)
-Called to submit cryptographic proof of payment.
-- **Input:** `{"address": "7...", "tx_id": "...", "tx_key": "..."}`
-- **Returns:** `{"status": "paid", "amount_received": 12345}`
+### 2. Settle Payment (`POST /settle`)
+The primary endpoint for unlocking resources.
+- **Input:**
+  ```json
+  {
+    "paymentPayload": {
+      "address": "7...",
+      "tx_id": "...",
+      "tx_key": "..."
+    },
+    "paymentRequirements": {
+      "scheme": "exact",
+      "network": "monero:stagenet"
+    }
+  }
+  ```
+- **Returns:** `{"success": true, "transaction": "...", "network": "monero:stagenet", "payer": "anonymous"}`
 
-### 3. Check Status (`GET /invoices/:address`)
-Polls the current status of an invoice.
+---
+
+## Merchant Helper API
+
+### Create Invoice (`POST /invoices`)
+Used by your server to prepare a challenge for the user.
+- **Input:** `{"amount_usd": 0.10}`
+- **Returns:** `{"address": "7...", "amount_piconero": 650000, "invoice_id": "...", "status": "pending"}`
 
 ## Security & Confirmation Levels
 By default, this facilitator is configured for **0-Conf (Instant)** verification. This allows for a "Web Native" experience where resources are unlocked the moment a transaction hits the mempool.

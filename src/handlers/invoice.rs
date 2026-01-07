@@ -6,6 +6,11 @@ use axum::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
+fn get_network_id() -> String {
+    let net = std::env::var("XMR_NETWORK").unwrap_or_else(|_| "mainnet".into());
+    format!("monero:{}", net)
+}
+
 pub async fn create_invoice(
     State(state): State<SharedState>,
     Json(payload): Json<CreateInvoiceRequest>,
@@ -44,7 +49,7 @@ pub async fn create_invoice(
         amount_piconero: amount,
         invoice_id: uuid::Uuid::new_v4().to_string(),
         status: "pending".to_string(),
-        network: std::env::var("XMR_NETWORK").unwrap_or("mainnet".into()),
+        network: get_network_id(),
     }))
 }
 
@@ -65,6 +70,6 @@ pub async fn get_invoice_status(
         amount_piconero: row.amount_required as u64,
         invoice_id: row.metadata.unwrap_or_default(),
         status: row.status.unwrap_or_else(|| "unknown".to_string()),
-        network: std::env::var("XMR_NETWORK").unwrap_or("mainnet".into()),
+        network: get_network_id(),
     }))
 }
