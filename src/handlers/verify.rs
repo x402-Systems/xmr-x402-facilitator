@@ -27,9 +27,8 @@ pub async fn verify_payment(
     State(state): State<SharedState>,
     Json(req): Json<X402Request>,
 ) -> Result<Json<VerifyResponse>, AppError> {
-    //println!("📥 RECEIVED VERIFY REQUEST");
+    println!("📥 RECEIVED VERIFY REQUEST");
 
-    // Access the nested payload
     let inner = req.payment_payload.payload;
 
     let invoice = sqlx::query!(
@@ -43,9 +42,9 @@ pub async fn verify_payment(
     let required = invoice.amount_required as u64;
     let mut received = 0;
 
-    for i in 0..10 {
-        // Increased retries
-        let (rec, _) = state
+    // Retry loop: Don't use '?' inside here if we want to actually retry!
+    for i in 0..15 {
+        match state
             .monero
             .verify_payment_proof(
                 inner.tx_id.clone(),
@@ -53,28 +52,43 @@ pub async fn verify_payment(
                 inner.address.clone(),
             )
             .await
-            .map_err(AppError::Rpc)?;
-
-        received = rec;
-        if received >= required {
-            break;
+        {
+            Ok((rec, _)) => {
+                received = rec;
+                if received >= required {
+                    println!(
+                        "✅ Attempt {}: Success! Received {} piconero",
+                        i + 1,
+                        received
+                    );
+                    break;
+                }
+                println!(
+                    "⏳ Attempt {}: Found TX but amount {} < {}",
+                    i + 1,
+                    received,
+                    required
+                );
+            }
+            Err(e) => {
+                println!("⏳ Attempt {}: TX not in mempool yet... ({})", i + 1, e);
+            }
         }
-        println!(
-            "Attempt {}: Received {}/{} - Waiting for mempool...",
-            i + 1,
-            received,
-            required
-        );
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
     let is_valid = received >= required;
+
+    if !is_valid {
+        println!("❌ VERIFICATION FAILED after 15 attempts");
+    }
+
     Ok(Json(VerifyResponse {
         is_valid,
         invalid_reason: if is_valid {
             None
         } else {
-            Some("Insufficient funds or tx not found".into())
+            Some("Transaction not found or insufficient".into())
         },
     }))
 }
@@ -83,7 +97,7 @@ pub async fn settle_payment(
     State(state): State<SharedState>,
     Json(req): Json<X402Request>,
 ) -> Result<Json<SettleResponse>, AppError> {
-    //println!("📥 RECEIVED SETTLE REQUEST");
+    println!("📥 RECEIVED SETTLE REQUEST");
     let inner = req.payment_payload.payload;
 
     let invoice = sqlx::query!(
@@ -94,7 +108,8 @@ pub async fn settle_payment(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    let (received, confirmations) = state
+    // We don't need a loop in settle because verify already caught it
+    let (received, _) = state
         .monero
         .verify_payment_proof(
             inner.tx_id.clone(),
@@ -113,7 +128,7 @@ pub async fn settle_payment(
         .execute(&state.db)
         .await?;
 
-        //println!("🎉 SETTLEMENT SUCCESS: Tx {}", inner.tx_id);
+        println!("🎉 SETTLEMENT SUCCESS: Tx {}", inner.tx_id);
         Ok(Json(SettleResponse {
             success: true,
             transaction: inner.tx_id,
@@ -121,6 +136,7 @@ pub async fn settle_payment(
             payer: "anonymous".to_string(),
         }))
     } else {
+        println!("❌ SETTLE FAILED: Received only {}", received);
         Err(AppError::BadRequest("Insufficient funds".into()))
     }
 }
