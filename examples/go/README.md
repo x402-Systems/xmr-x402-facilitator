@@ -1,5 +1,8 @@
 # Go Integration Examples
 
+> [!warning] AI Generated README
+> Not all info may be accurate
+
 This directory contains example implementations showing how to integrate the XMR x402 Facilitator with Go web services.
 
 ## Examples
