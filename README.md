@@ -55,7 +55,7 @@ This project includes a standard **OpenAPI 3.1** specification.
 2. **Initialize Database:**
    ```bash
    touch facilitator.db
-   sqlite3 facilitator.db "CREATE TABLE invoices (address TEXT PRIMARY KEY, amount_required INTEGER NOT NULL, metadata TEXT, status TEXT, tx_id TEXT, created_at INTEGER NOT NULL);"
+   sqlite3 facilitator.db "CREATE TABLE invoices (address TEXT PRIMARY KEY, amount_required INTEGER NOT NULL, metadata TEXT, payer_id TEXT, status TEXT, tx_id TEXT, created_at INTEGER NOT NULL);"
    ```
 3. **Build & Run:**
    ```bash

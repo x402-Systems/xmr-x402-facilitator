@@ -28,6 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             address TEXT PRIMARY KEY,
             amount_required INTEGER NOT NULL,
             metadata TEXT,
+            payer_id TEXT,
             status TEXT,
             tx_id TEXT,
             created_at INTEGER NOT NULL

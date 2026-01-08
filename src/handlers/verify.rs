@@ -101,7 +101,7 @@ pub async fn settle_payment(
     let inner = req.payment_payload.payload;
 
     let invoice = sqlx::query!(
-        "SELECT amount_required FROM invoices WHERE address = ?",
+        "SELECT amount_required, payer_id FROM invoices WHERE address = ?",
         inner.address
     )
     .fetch_optional(&state.db)
@@ -128,12 +128,14 @@ pub async fn settle_payment(
         .execute(&state.db)
         .await?;
 
+        let resolved_payer = invoice.payer_id.unwrap_or_else(|| "anonymous".to_string());
+
         println!("🎉 SETTLEMENT SUCCESS: Tx {}", inner.tx_id);
         Ok(Json(SettleResponse {
             success: true,
             transaction: inner.tx_id,
             network: get_network_id(),
-            payer: "anonymous".to_string(),
+            payer: resolved_payer,
         }))
     } else {
         println!("❌ SETTLE FAILED: Received only {}", received);

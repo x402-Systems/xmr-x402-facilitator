@@ -67,6 +67,7 @@ pub struct SettleResponse {
 pub struct CreateInvoiceRequest {
     pub amount_usd: f64,
     pub metadata: Option<String>,
+    pub payer_id: Option<String>,
 }
 
 #[derive(Serialize)]

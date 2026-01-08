@@ -62,10 +62,11 @@ pub async fn create_invoice(
     let amount_i64 = amount as i64;
 
     sqlx::query!(
-        "INSERT INTO invoices (address, amount_required, metadata, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
+        "INSERT INTO invoices (address, amount_required, metadata, payer_id, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
         address,
         amount_i64,
         invoice_id,
+        payload.payer_id,
         now
     )
     .execute(&state.db)
