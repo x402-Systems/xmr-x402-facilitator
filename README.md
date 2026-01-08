@@ -8,7 +8,7 @@ This project acts as a **sidecar daemon** for web servers, AI agents, and micros
 To provide a sovereign, self-hosted alternative to corporate payment facilitators. By running this daemon alongside your application, you can gate resources behind XMR micro-payments while maintaining 100% control over your own View Keys and Node infrastructure.
 
 ## Protocol Flow
-![Flow Chart](assets/flow-chart.png)
+![Flow Chart](assets/flow-chart-1.png)
 
 1. **Merchant App** calls `/invoices` to generate a subaddress and price.
 2. **Merchant App** returns a `402 Payment Required` header to the Client.
