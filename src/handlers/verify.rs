@@ -1,6 +1,8 @@
 use crate::models::*;
 use crate::state::SharedState;
 use axum::{Json, extract::State};
+use std::time::Duration;
+use tokio::time::sleep;
 
 /// Helper to get the network string from ENV (e.g., "monero:stagenet")
 fn get_network_id() -> String {
@@ -25,46 +27,68 @@ pub async fn verify_payment(
     State(state): State<SharedState>,
     Json(req): Json<X402Request>,
 ) -> Result<Json<VerifyResponse>, AppError> {
-    let payload: MoneroPaymentPayload = serde_json::from_value(req.payment_payload)
-        .map_err(|_| AppError::BadRequest("Invalid Monero payload".into()))?;
+    //println!("📥 RECEIVED VERIFY REQUEST");
+
+    // Access the nested payload
+    let inner = req.payment_payload.payload;
 
     let invoice = sqlx::query!(
         "SELECT amount_required FROM invoices WHERE address = ?",
-        payload.address
+        inner.address
     )
     .fetch_optional(&state.db)
     .await?
     .ok_or(AppError::NotFound)?;
 
-    let (received, _) = state
-        .monero
-        .verify_payment_proof(payload.tx_id, payload.tx_key, payload.address)
-        .await
-        .map_err(AppError::Rpc)?;
+    let required = invoice.amount_required as u64;
+    let mut received = 0;
 
-    let is_valid = received >= (invoice.amount_required as u64);
+    for i in 0..10 {
+        // Increased retries
+        let (rec, _) = state
+            .monero
+            .verify_payment_proof(
+                inner.tx_id.clone(),
+                inner.tx_key.clone(),
+                inner.address.clone(),
+            )
+            .await
+            .map_err(AppError::Rpc)?;
 
+        received = rec;
+        if received >= required {
+            break;
+        }
+        println!(
+            "Attempt {}: Received {}/{} - Waiting for mempool...",
+            i + 1,
+            received,
+            required
+        );
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+
+    let is_valid = received >= required;
     Ok(Json(VerifyResponse {
         is_valid,
         invalid_reason: if is_valid {
             None
         } else {
-            Some("Insufficient amount".into())
+            Some("Insufficient funds or tx not found".into())
         },
     }))
 }
 
-/// POST /settle
 pub async fn settle_payment(
     State(state): State<SharedState>,
     Json(req): Json<X402Request>,
 ) -> Result<Json<SettleResponse>, AppError> {
-    let payload: MoneroPaymentPayload = serde_json::from_value(req.payment_payload)
-        .map_err(|_| AppError::BadRequest("Invalid Monero payload".into()))?;
+    //println!("📥 RECEIVED SETTLE REQUEST");
+    let inner = req.payment_payload.payload;
 
     let invoice = sqlx::query!(
         "SELECT amount_required FROM invoices WHERE address = ?",
-        payload.address
+        inner.address
     )
     .fetch_optional(&state.db)
     .await?
@@ -73,37 +97,30 @@ pub async fn settle_payment(
     let (received, confirmations) = state
         .monero
         .verify_payment_proof(
-            payload.tx_id.clone(),
-            payload.tx_key.clone(),
-            payload.address.clone(),
+            inner.tx_id.clone(),
+            inner.tx_key.clone(),
+            inner.address.clone(),
         )
         .await
         .map_err(AppError::Rpc)?;
 
-    let required_confs = std::env::var("CONFIRMATIONS_REQUIRED")
-        .unwrap_or_else(|_| "0".to_string())
-        .parse::<u64>()
-        .unwrap_or(0);
-
-    if received >= (invoice.amount_required as u64) && confirmations >= required_confs {
+    if received >= (invoice.amount_required as u64) {
         sqlx::query!(
             "UPDATE invoices SET status = 'paid', tx_id = ? WHERE address = ?",
-            payload.tx_id,
-            payload.address
+            inner.tx_id,
+            inner.address
         )
         .execute(&state.db)
         .await?;
 
+        //println!("🎉 SETTLEMENT SUCCESS: Tx {}", inner.tx_id);
         Ok(Json(SettleResponse {
             success: true,
-            transaction: payload.tx_id,
-            network: get_network_id(), // Dynamic network name
+            transaction: inner.tx_id,
+            network: get_network_id(),
             payer: "anonymous".to_string(),
         }))
     } else {
-        Err(AppError::BadRequest(format!(
-            "Payment failed. Received: {}/{} piconero. Confirmations: {}/{}",
-            received, invoice.amount_required, confirmations, required_confs
-        )))
+        Err(AppError::BadRequest("Insufficient funds".into()))
     }
 }

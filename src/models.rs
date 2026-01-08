@@ -7,14 +7,33 @@ use serde::{Deserialize, Serialize};
 
 // --- Standard x402 Wrappers ---
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct X402Request {
     #[serde(rename = "paymentPayload", alias = "payment_payload")]
-    pub payment_payload: serde_json::Value,
+    pub payment_payload: X402PaymentPayloadWrapper,
     #[serde(rename = "paymentRequirements", alias = "payment_requirements")]
     pub payment_requirements: serde_json::Value,
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+pub struct X402PaymentPayloadWrapper {
+    #[serde(rename = "x402Version")]
+    pub x402_version: i32,
+    pub payload: MoneroPaymentPayload,
+}
+
+// --- Monero Specific Payload ---
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MoneroPaymentPayload {
+    pub address: String,
+    #[serde(alias = "txId")]
+    pub tx_id: String,
+    #[serde(alias = "txKey")]
+    pub tx_key: String,
+}
+
+// --- Rest of the file (InvoiceResponse, AppError, etc.) remains the same ---
 #[derive(Serialize)]
 pub struct SupportedResponse {
     pub kinds: Vec<SupportedKind>,
@@ -44,19 +63,6 @@ pub struct SettleResponse {
     pub payer: String,
 }
 
-// --- Monero Specific Payload (The internal content of paymentPayload) ---
-
-#[derive(Serialize, Deserialize)]
-pub struct MoneroPaymentPayload {
-    pub address: String,
-    #[serde(alias = "txId")]
-    pub tx_id: String,
-    #[serde(alias = "txKey")]
-    pub tx_key: String,
-}
-
-// --- Merchant Internal API ---
-
 #[derive(Deserialize)]
 pub struct CreateInvoiceRequest {
     pub amount_usd: f64,
@@ -67,12 +73,11 @@ pub struct CreateInvoiceRequest {
 pub struct InvoiceResponse {
     pub address: String,
     pub amount_piconero: u64,
-    pub invoice_id: String, // Restored field
+    pub invoice_id: String,
     pub status: String,
     pub network: String,
 }
 
-// --- Universal Error Handler ---
 pub enum AppError {
     Database(String),
     Rpc(String),
@@ -93,7 +98,7 @@ impl IntoResponse for AppError {
 }
 
 impl From<sqlx::Error> for AppError {
-    fn from(err: sqlx::Error) -> Self {
+    fn from(err: sqlx::Error) -> self::AppError {
         AppError::Database(err.to_string())
     }
 }
