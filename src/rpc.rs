@@ -1,5 +1,5 @@
-//use crate::models::X402Requirement;
 use serde_json::json;
+use std::time::Duration;
 
 pub struct MoneroClient {
     pub rpc_url: String,
@@ -27,35 +27,62 @@ impl MoneroClient {
             .to_string())
     }
 
-    /// Fetches real XMR price from CoinGecko and converts USD to Piconero
+    /// Primary price fetcher with failover logic
     pub async fn get_xmr_price_piconero(&self, usd_amount: f64) -> Result<u64, String> {
-        let url = "https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies=usd";
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .map_err(|e| format!("Client build error: {}", e))?;
-
-        let res = client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| format!("Network error: {}", e))?;
-
-        if !res.status().is_success() {
-            return Err(format!("Price API returned status {}", res.status()));
+        match self.fetch_kraken_price().await {
+            Ok(price) => {
+                println!("💹 Price Feed: Kraken @ ${:.2}", price);
+                return Ok(self.convert_to_piconero(usd_amount, price));
+            }
+            Err(e) => eprintln!("⚠️ Kraken Price Fail: {}", e),
         }
 
-        let json: serde_json::Value = res
-            .json()
-            .await
-            .map_err(|e| format!("JSON parse error: {}", e))?;
+        match self.fetch_cryptocompare_price().await {
+            Ok(price) => {
+                println!("💹 Price Feed: CryptoCompare @ ${:.2}", price);
+                return Ok(self.convert_to_piconero(usd_amount, price));
+            }
+            Err(e) => eprintln!("❌ CryptoCompare Price Fail: {}", e),
+        }
 
-        let xmr_price_usd = json["monero"]["usd"]
+        Err("Failed to fetch XMR price from all providers".into())
+    }
+
+    async fn fetch_kraken_price(&self) -> Result<f64, String> {
+        let url = "https://api.kraken.com/0/public/Ticker?pair=XMRUSD";
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let res = client.get(url).send().await.map_err(|e| e.to_string())?;
+        let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+
+        let price_str = json["result"]["XXMRZUSD"]["c"][0]
+            .as_str()
+            .ok_or("Invalid Kraken JSON structure")?;
+
+        price_str.parse::<f64>().map_err(|e| e.to_string())
+    }
+
+    async fn fetch_cryptocompare_price(&self) -> Result<f64, String> {
+        let url = "https://min-api.cryptocompare.com/data/price?fsym=XMR&tsyms=USD";
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let res = client.get(url).send().await.map_err(|e| e.to_string())?;
+        let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+
+        json["USD"]
             .as_f64()
-            .ok_or("Price data missing in response")?;
+            .ok_or("USD field missing in CryptoCompare response".into())
+    }
 
-        let xmr_required = usd_amount / xmr_price_usd;
-        Ok((xmr_required * 1_000_000_000_000.0) as u64)
+    fn convert_to_piconero(&self, usd_amount: f64, xmr_price: f64) -> u64 {
+        let xmr_required = usd_amount / xmr_price;
+        (xmr_required * 1_000_000_000_000.0) as u64
     }
 
     pub async fn check_payment(&self, address: String) -> Result<u64, String> {
@@ -123,7 +150,6 @@ impl MoneroClient {
 
         let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
 
-        // check_tx_key returns "received" (amount) and "confirmations"
         if let Some(result) = json.get("result") {
             let received = result["received"].as_u64().unwrap_or(0);
             let confirmations = result["confirmations"].as_u64().unwrap_or(0);
