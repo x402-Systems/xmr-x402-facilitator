@@ -80,7 +80,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             rpc_url: monero_url,
         },
         db: pool,
-        price_per_access_usd: 0.10, // Default fallback
     });
 
     let cors = CorsLayer::new()

@@ -85,46 +85,6 @@ impl MoneroClient {
         (xmr_required * 1_000_000_000_000.0) as u64
     }
 
-    pub async fn check_payment(&self, address: String) -> Result<u64, String> {
-        let client = reqwest::Client::new();
-        let res = client
-            .post(&self.rpc_url)
-            .json(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": "0",
-                "method": "get_transfers",
-                "params": {
-                    "in": true,
-                    "account_index": 0,
-                    "pool": true
-                }
-            }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-        let mut total_received = 0;
-
-        if let Some(transfers) = json["result"]["in"].as_array() {
-            for t in transfers {
-                if t["address"] == address {
-                    total_received += t["amount"].as_u64().unwrap_or(0);
-                }
-            }
-        }
-
-        if let Some(pool) = json["result"]["pool"].as_array() {
-            for t in pool {
-                if t["address"] == address {
-                    total_received += t["amount"].as_u64().unwrap_or(0);
-                }
-            }
-        }
-
-        Ok(total_received)
-    }
-
     pub async fn verify_payment_proof(
         &self,
         txid: String,
