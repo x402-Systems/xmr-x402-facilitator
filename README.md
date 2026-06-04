@@ -14,7 +14,7 @@ To provide a sovereign, self-hosted alternative to corporate payment facilitator
 2. **Merchant App** returns a `402 Payment Required` header to the Client.
 3. **Client** pays via XMR and retrieves the `tx_key` from their wallet.
 4. **Client** submits `tx_id` and `tx_key` to the Merchant.
-5. **Merchant App** calls `/settle` on this Facilitator to verify and unlock the resource.
+5. **Merchant App** calls `/settle` on this Facilitator to verify the payment proof and enforce the configured confirmation policy before unlocking the resource.
 
 ## Features
 - **x402 Compliant:** Implements `/supported`, `/verify`, and `/settle` endpoints.
@@ -22,15 +22,15 @@ To provide a sovereign, self-hosted alternative to corporate payment facilitator
 - **Universal Sidecar:** RESTful API for creating invoices and verifying payments from any programming language.
 - **Cryptographic Proof-of-Payment:** Uses Monero's `tx_key` (Transaction Secret Key) to verify sender ownership, preventing header spoofing and replay attacks.
 - **Persistent Storage:** SQLite/SQLx backend tracks invoice lifecycles (Pending, Paid, Expired).
-- **Dynamic Market Pricing:** Fetches real-time XMR/USD exchange rates via CoinGecko.
-- **0-Conf Ready:** Scans the mempool for incoming transactions to provide an instant "Web Native" experience.
+- **Dynamic Market Pricing:** Fetches real-time XMR/USD exchange rates via Kraken.
+- **Configurable Confirmation Policy:** Supports both instant 0-conf verification and confirmation-gated settlement via environment configuration.
 - **Privacy Centric:** Generates unique subaddresses for every request; no address reuse.
 
 ## Tech Stack
 - **Language:** Rust (Axum)
 - **Database:** SQLite (SQLx)
 - **Crypto Integration:** Monero-Wallet-RPC
-- **Pricing:** CoinGecko API
+- **Pricing:** Kraken and CryptoCompare (fallback) API
 
 ## Developer Tooling
 This project includes a standard **OpenAPI 3.1** specification.
@@ -61,6 +61,20 @@ This project includes a standard **OpenAPI 3.1** specification.
    ```bash
    cargo run
    ```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | `sqlite:facilitator.db` | SQLite database location |
+| `MONERO_RPC_URL` | `http://127.0.0.1:18083/json_rpc` | Monero Wallet RPC endpoint |
+| `HOST` | `0.0.0.0` | Bind host |
+| `PORT` | `3113` | Bind port |
+| `XMR_NETWORK` | `mainnet` | Network identifier returned by `/supported` |
+| `CONFIRMATIONS_REQUIRED` | `0` | Minimum confirmations required before verification succeeds |
+| `VERIFY_MAX_ATTEMPTS` | `300` | Number of verification polling attempts |
+| `VERIFY_POLL_INTERVAL_SECS` | `30` | Delay between verification polling attempts |
+
 
 ## Standard x402 API Reference
 
@@ -96,12 +110,50 @@ Used by your server to prepare a challenge for the user.
 - **Returns:** `{"address": "7...", "amount_piconero": 650000, "invoice_id": "...", "status": "pending"}`
 
 ## Security & Confirmation Levels
-By default, this facilitator is configured for **0-Conf (Instant)** verification. This allows for a "Web Native" experience where resources are unlocked the moment a transaction hits the mempool.
+
+By default, this facilitator is configured for **0-Conf (Instant)** verification, allowing resources to be unlocked as soon as a transaction is visible to the wallet RPC.
+
+For applications requiring stronger settlement guarantees, the facilitator can enforce a minimum confirmation depth before a payment is considered valid.
 
 ### Configuration
-You can adjust the security level in your `.env` file:
-- `CONFIRMATIONS_REQUIRED=0`: Instant access. Ideal for low-value digital goods (API hits, articles).
-- `CONFIRMATIONS_REQUIRED=2`: Requires the transaction to be mined and confirmed. Recommended for high-value goods to prevent double-spend/race attacks.
+
+```env
+CONFIRMATIONS_REQUIRED=0
+VERIFY_MAX_ATTEMPTS=15
+VERIFY_POLL_INTERVAL_SECS=2
+```
+
+#### Confirmation Policy
+
+- `CONFIRMATIONS_REQUIRED=0`
+  - Instant verification.
+  - Suitable for low-value digital goods, API requests, AI agent actions, and metered services.
+
+- `CONFIRMATIONS_REQUIRED=1`
+  - Requires inclusion in a block.
+  - Provides protection against mempool-level race conditions.
+
+- `CONFIRMATIONS_REQUIRED=2+`
+  - Requires additional confirmation depth before verification succeeds.
+  - Recommended for higher-value resources where stronger settlement assurance is desired.
+
+### Verification Behavior
+
+When a confirmation requirement is configured, the facilitator will poll the Monero Wallet RPC until either:
+
+1. The transaction has reached the required confirmation depth.
+2. The configured verification retry limit is exceeded.
+
+If the transaction amount is sufficient but the confirmation threshold has not yet been reached, verification will return:
+
+```json
+{
+  "isValid": false,
+  "invalidReason": "Insufficient confirmations"
+}
+```
+
+Applications can retry verification later or increase the polling window through the environment configuration.
 
 ### The `tx_key` Proof
 Because Monero is private, a transaction hash (`tx_id`) is not enough to prove ownership. This daemon requires the `tx_key` (Transaction Secret Key) from the client. The daemon uses this to verify:
@@ -118,6 +170,7 @@ Unlike transparent ledgers where seeing a transaction is enough proof, Monero's 
 - [x] Universal REST API
 - [x] Cryptographic verification (tx_key)
 - [x] SQLite persistence
+- [x] Configurable confirmation enforcement
 - [ ] Webhook support (Next)
 - [ ] Tor / .onion service support (Next)
 
