@@ -40,9 +40,10 @@ pub async fn verify_payment(
 
     let required = invoice.amount_required as u64;
     let mut received = 0;
+    let mut confs: u64 = 0;
 
     // Retry loop: Don't use '?' inside here if we want to actually retry!
-    for i in 0..15 {
+    for i in 0..state.verify_max_attempts {
         match state
             .monero
             .verify_payment_proof(
@@ -52,42 +53,55 @@ pub async fn verify_payment(
             )
             .await
         {
-            Ok((rec, _)) => {
+            Ok((rec, c)) => {
                 received = rec;
-                if received >= required {
+                confs = c;
+                if received >= required && confs >= state.min_confirmations {
                     println!(
-                        "✅ Attempt {}: Success! Received {} piconero",
+                        "✅ Attempt {}: Success! {} piconero, {} confs",
                         i + 1,
-                        received
+                        received,
+                        confs
                     );
                     break;
                 }
                 println!(
-                    "⏳ Attempt {}: Found TX but amount {} < {}",
+                    "⏳ Attempt {}: amount={} (need {}), confs={} (need {})",
                     i + 1,
                     received,
-                    required
+                    required,
+                    confs,
+                    state.min_confirmations
                 );
             }
             Err(e) => {
                 println!("⏳ Attempt {}: TX not in mempool yet... ({})", i + 1, e);
             }
         }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(state.verify_poll_interval)).await;
     }
 
-    let is_valid = received >= required;
+    let (amount_ok, confs_ok) = (received >= required, confs >= state.min_confirmations);
+    let is_valid = amount_ok && confs_ok;
 
     if !is_valid {
-        println!("❌ VERIFICATION FAILED after 15 attempts");
+        println!(
+            "❌ VERIFICATION FAILED after {} attempts",
+            state.verify_max_attempts
+        );
     }
 
     Ok(Json(VerifyResponse {
         is_valid,
         invalid_reason: if is_valid {
             None
+        } else if !amount_ok {
+            Some("Transaction not found or insufficient amount".into())
         } else {
-            Some("Transaction not found or insufficient".into())
+            Some(format!(
+                "Insufficient confirmations: {} of {} required",
+                confs, state.min_confirmations
+            ))
         },
     }))
 }
@@ -108,7 +122,7 @@ pub async fn settle_payment(
     .ok_or(AppError::NotFound)?;
 
     // We don't need a loop in settle because verify already caught it
-    let (received, _) = state
+    let (received, confs) = state
         .monero
         .verify_payment_proof(
             inner.tx_id.clone(),
@@ -118,7 +132,7 @@ pub async fn settle_payment(
         .await
         .map_err(AppError::Rpc)?;
 
-    if received >= (invoice.amount_required as u64) {
+    if received >= (invoice.amount_required as u64) && confs >= state.min_confirmations {
         sqlx::query!(
             "UPDATE invoices SET status = 'paid', tx_id = ? WHERE address = ?",
             inner.tx_id,
@@ -136,8 +150,12 @@ pub async fn settle_payment(
             network: get_network_id(),
             payer: resolved_payer,
         }))
-    } else {
-        println!("❌ SETTLE FAILED: Received only {}", received);
+    } else if received < invoice.amount_required as u64 {
         Err(AppError::BadRequest("Insufficient funds".into()))
+    } else {
+        Err(AppError::BadRequest(format!(
+            "Insufficient confirmations: got {}, need {}",
+            confs, state.min_confirmations
+        )))
     }
 }

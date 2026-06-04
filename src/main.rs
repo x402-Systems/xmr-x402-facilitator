@@ -75,11 +75,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let monero_url =
         std::env::var("MONERO_RPC_URL").unwrap_or("http://127.0.0.1:18083/json_rpc".into());
 
+    let confirmations_required = std::env::var("CONFIRMATIONS_REQUIRED")
+        .unwrap_or_else(|_| "0".to_string())
+        .parse::<u64>()
+        .unwrap_or(0);
+
+    let verify_max_attempts = std::env::var("VERIFY_MAX_ATTEMPTS")
+        .unwrap_or_else(|_| "15".to_string())
+        .parse::<usize>()
+        .unwrap_or(15);
+
+    let verify_poll_interval = std::env::var("VERIFY_POLL_INTERVAL_SECS")
+        .unwrap_or_else(|_| "2".to_string())
+        .parse::<u64>()
+        .unwrap_or(2);
+
     let shared_state = Arc::new(state::AppState {
         monero: rpc::MoneroClient {
             rpc_url: monero_url,
         },
         db: pool,
+        min_confirmations: confirmations_required,
+        verify_max_attempts: verify_max_attempts,
+        verify_poll_interval: verify_poll_interval,
     });
 
     let cors = CorsLayer::new()
