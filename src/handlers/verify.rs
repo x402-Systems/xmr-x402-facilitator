@@ -31,7 +31,7 @@ pub async fn verify_payment(
     let inner = req.payment_payload.payload;
 
     let invoice = sqlx::query!(
-        "SELECT amount_required FROM invoices WHERE address = ?",
+        "SELECT amount_required FROM invoices WHERE address = ? AND status = 'pending'",
         inner.address
     )
     .fetch_optional(&state.db)
@@ -114,7 +114,7 @@ pub async fn settle_payment(
     let inner = req.payment_payload.payload;
 
     let invoice = sqlx::query!(
-        "SELECT amount_required, payer_id FROM invoices WHERE address = ?",
+        "SELECT amount_required, payer_id FROM invoices WHERE address = ? AND status = 'pending'",
         inner.address
     )
     .fetch_optional(&state.db)
@@ -133,13 +133,17 @@ pub async fn settle_payment(
         .map_err(AppError::Rpc)?;
 
     if received >= (invoice.amount_required as u64) && confs >= state.min_confirmations {
-        sqlx::query!(
-            "UPDATE invoices SET status = 'paid', tx_id = ? WHERE address = ?",
+        let result = sqlx::query!(
+            "UPDATE invoices SET status = 'paid', tx_id = ? WHERE address = ? AND status = 'pending'",
             inner.tx_id,
             inner.address
         )
         .execute(&state.db)
         .await?;
+
+        if result.rows_affected() != 1 {
+            return Err(AppError::BadRequest("Invoice already settled".into()));
+        }
 
         let resolved_payer = invoice.payer_id.unwrap_or_else(|| "anonymous".to_string());
 

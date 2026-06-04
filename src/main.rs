@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let reaper_pool = pool.clone();
     tokio::spawn(async move {
-        println!("Invoice Reaper initialized (cleaning pending invoices > 24)");
+        println!("Invoice Reaper initialized (cleaning pending invoices >  1 hour)");
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
 
         loop {
